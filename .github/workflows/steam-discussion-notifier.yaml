@@ -78,6 +78,4 @@ jobs:
         uses: tsickert/discord-webhook@v7.0.0
         with:
           webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          embed-title: ${{ matrix.post.title }}
-          embed-url: ${{ matrix.post.url }}
-          embed-description: "**${{ matrix.post.game_title }}**\n${{ matrix.post.url }}"
+          content: "**${{ matrix.post.game_title }}** - [${{ matrix.post.title }}](${{ matrix.post.url }})"
