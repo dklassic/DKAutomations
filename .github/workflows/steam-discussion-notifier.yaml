@@ -64,6 +64,17 @@ jobs:
           git diff --cached --quiet || git commit -m "chore: update Steam discussion state [skip ci]"
           git push
 
+  notify-discord-no-posts:
+    needs: fetch-discussions
+    if: needs.fetch-discussions.outputs.has_posts == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Discord notification
+        uses: tsickert/discord-webhook@v7.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          content: "Updated."
+
   notify-discord:
     needs: fetch-discussions
     if: needs.fetch-discussions.outputs.has_posts == 'true'
