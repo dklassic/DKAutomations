@@ -1,0 +1,83 @@
+name: Steam Discussion Notifier
+
+on:
+  schedule:
+    # Run every hour
+    - cron: '0 * * * *'
+  # Allow manual triggering for testing
+  workflow_dispatch:
+    inputs:
+      steam_app_id:
+        description: 'Steam App ID to monitor (overrides the predefined list)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+# To monitor additional games, add their App IDs to this list.
+env:
+  APP_IDS: '["3718870", "2589050", "1423670", "1274830"]'
+
+jobs:
+  fetch-discussions:
+    runs-on: ubuntu-latest
+    outputs:
+      posts: ${{ steps.fetch.outputs.posts }}
+      has_posts: ${{ steps.fetch.outputs.has_posts }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch new Steam discussions
+        id: fetch
+        run: |
+          # Use manual input if provided, otherwise use the predefined list
+          if [ -n "${{ inputs.steam_app_id }}" ]; then
+            IDS='["${{ inputs.steam_app_id }}"]'
+          else
+            IDS='${{ env.APP_IDS }}'
+          fi
+
+          ALL_POSTS='[]'
+          for APP_ID in $(echo "$IDS" | python3 -c "import sys,json; print(' '.join(json.load(sys.stdin)))"); do
+            STATE_FILE=".github/steam_discussion_state_${APP_ID}.txt"
+            POSTS=$(python3 .github/scripts/fetch_steam_discussions.py \
+              "$APP_ID" \
+              "$STATE_FILE")
+            # Merge POSTS into ALL_POSTS
+            ALL_POSTS=$(python3 -c "import sys,json; a=json.loads(sys.argv[1]); b=json.loads(sys.argv[2]); print(json.dumps(a+b))" "$ALL_POSTS" "$POSTS")
+          done
+
+          echo "posts=$ALL_POSTS" >> "$GITHUB_OUTPUT"
+          if [ "$ALL_POSTS" = "[]" ]; then
+            echo "has_posts=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_posts=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit updated state files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/steam_discussion_state_*.txt
+          git diff --cached --quiet || git commit -m "chore: update Steam discussion state [skip ci]"
+          git push
+
+  notify-discord:
+    needs: fetch-discussions
+    if: needs.fetch-discussions.outputs.has_posts == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        post: ${{ fromJSON(needs.fetch-discussions.outputs.posts) }}
+      # Send notifications one at a time to avoid rate limiting
+      max-parallel: 1
+    steps:
+      - name: Send Discord notification
+        uses: tsickert/discord-webhook@v7.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          embed-title: ${{ matrix.post.title }}
+          embed-url: ${{ matrix.post.url }}
+          embed-description: "**${{ matrix.post.game_title }}**\n${{ matrix.post.url }}"
